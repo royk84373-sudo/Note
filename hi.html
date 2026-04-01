@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pro Notes App</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --accent: #6366f1;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+}
+
+/* 🔒 Stop full app scroll */
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.screen {
+  display: none;
+  height: 100vh;
+  overflow: hidden;
+}
+.screen.active { display: block; }
+
+.header {
+  padding: 15px;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+#search {
+  width: 90%;
+  margin: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+}
+
+/* ✅ Only list scrolls */
+#notesList {
+  list-style: none;
+  padding: 10px;
+  height: calc(100vh - 130px);
+  overflow-y: auto;
+}
+
+#notesList li {
+  background: var(--panel);
+  margin-bottom: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* Floating button */
+.fab {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  width: 60px;
+  height: 60px;
+  font-size: 28px;
+  border-radius: 50%;
+}
+
+/* Editor */
+.editor {
+  height: 100%;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+input, textarea {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  outline: none;
+}
+
+#title { font-size: 22px; font-weight: bold; }
+
+textarea {
+  flex: 1;
+  margin-top: 10px;
+  overflow-y: auto;
+}
+
+.back-btn {
+  margin-bottom: 10px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.preview {
+  border-top: 1px solid var(--muted);
+  padding: 10px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+</style>
+</head>
+
+<body>
+
+<div id="historyScreen" class="screen active">
+  <div class="header">Notes</div>
+  <input id="search" placeholder="Search..." />
+  <ul id="notesList"></ul>
+  <button class="fab" id="newBtn">+</button>
+</div>
+
+<div id="editorScreen" class="screen">
+  <div class="editor">
+    <div class="back-btn" id="backBtn">← Back</div>
+    <input id="title" placeholder="Enter title..." />
+    <input id="tags" placeholder="Tags..." />
+    <textarea id="content"></textarea>
+    <div id="preview" class="preview"></div>
+  </div>
+</div>
+
+<script>
+/* DOM */
+const historyScreen = document.getElementById("historyScreen");
+const editorScreen = document.getElementById("editorScreen");
+
+const title = document.getElementById("title");
+const content = document.getElementById("content");
+const tags = document.getElementById("tags");
+const preview = document.getElementById("preview");
+
+const notesList = document.getElementById("notesList");
+const searchInput = document.getElementById("search");
+
+/* STATE */
+let notes = JSON.parse(localStorage.getItem("notes")) || [];
+let activeId = null;
+let longPressTimer;
+
+/* SAVE */
+function save() {
+  localStorage.setItem("notes", JSON.stringify(notes));
+}
+
+/* NAV */
+function openEditor(id) {
+  const note = notes.find(n => n.id === id);
+  if (!note) return;
+
+  activeId = id;
+
+  title.value = note.title || "";
+  content.value = note.content || "";
+  tags.value = (note.tags || []).join(",");
+
+  updatePreview();
+
+  historyScreen.classList.remove("active");
+  editorScreen.classList.add("active");
+}
+
+function goBack() {
+  editorScreen.classList.remove("active");
+  historyScreen.classList.add("active");
+  renderNotes();
+}
+
+/* CREATE */
+function createNote() {
+  const note = { id: Date.now(), title: "", content: "", tags: [] };
+  notes.unshift(note);
+  save();
+  renderNotes();
+  openEditor(note.id);
+}
+
+/* DELETE */
+function deleteNote(id) {
+  if (!confirm("Delete this note?")) return;
+  notes = notes.filter(n => n.id !== id);
+  save();
+  renderNotes();
+}
+
+/* RENDER */
+function renderNotes() {
+  const search = searchInput.value.toLowerCase();
+  notesList.innerHTML = "";
+
+  notes
+    .filter(n =>
+      (n.title || "").toLowerCase().includes(search) ||
+      (n.content || "").toLowerCase().includes(search)
+    )
+    .forEach(note => {
+
+      const li = document.createElement("li");
+      li.innerHTML = "<b>" + ((note.title || "").trim() || "Untitled") + "</b>";
+
+      let isLongPress = false;
+      let isScrolling = false;
+      let startY = 0;
+
+      /* TOUCH START */
+      li.addEventListener("touchstart", (e) => {
+        isLongPress = false;
+        isScrolling = false;
+        startY = e.touches[0].clientY;
+
+        longPressTimer = setTimeout(() => {
+          if (!isScrolling) {
+            isLongPress = true;
+            deleteNote(note.id);
+          }
+        }, 600);
+      });
+
+      /* TOUCH MOVE (SCROLL DETECT) */
+      li.addEventListener("touchmove", (e) => {
+        const moveY = e.touches[0].clientY;
+        if (Math.abs(moveY - startY) > 10) {
+          isScrolling = true;
+          clearTimeout(longPressTimer);
+        }
+      });
+
+      /* TOUCH END */
+      li.addEventListener("touchend", () => {
+        clearTimeout(longPressTimer);
+        if (!isLongPress && !isScrolling) {
+          openEditor(note.id);
+        }
+      });
+
+      /* MOUSE */
+      li.addEventListener("mousedown", () => {
+        isLongPress = false;
+
+        longPressTimer = setTimeout(() => {
+          isLongPress = true;
+          deleteNote(note.id);
+        }, 600);
+      });
+
+      li.addEventListener("mouseup", () => {
+        clearTimeout(longPressTimer);
+        if (!isLongPress) openEditor(note.id);
+      });
+
+      li.addEventListener("mouseleave", () => {
+        clearTimeout(longPressTimer);
+      });
+
+      notesList.appendChild(li);
+    });
+}
+
+/* INPUT */
+title.oninput = () => {
+  const note = notes.find(n => n.id === activeId);
+  if (!note) return;
+  note.title = title.value;
+  save();
+  renderNotes();
+};
+
+content.oninput = () => {
+  const note = notes.find(n => n.id === activeId);
+  if (!note) return;
+  note.content = content.value;
+  save();
+  updatePreview();
+};
+
+/* MARKDOWN */
+function updatePreview() {
+  let text = content.value;
+  text = text.replace(/^# (.*$)/gim, "<h1>$1</h1>");
+  text = text.replace(/\n/g, "<br>");
+  preview.innerHTML = text;
+}
+
+/* EVENTS */
+document.getElementById("newBtn").onclick = createNote;
+document.getElementById("backBtn").onclick = goBack;
+searchInput.oninput = renderNotes;
+
+/* INIT */
+if (notes.length) activeId = notes[0].id;
+renderNotes();
+</script>
+
+</body>
+</html>
